@@ -104,6 +104,11 @@
                 currentSubstepOrder = el.dataset.substepOrder;
                 el.classList.add( "substep-visible" );
                 el.classList.add( "substep-active" );
+                if ( currentSubstepOrder === undefined ) {
+
+                    // Stop after one substep as default order
+                    break;
+                }
             }
 
             return el;
