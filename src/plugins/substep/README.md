@@ -15,31 +15,48 @@ If you do so, this plugin will reveal the substeps in ascending order; any subst
 specified `data-substep-order` will be revealed after all substeps with a specified order have
 been revealed.
 
-Calls to `goto()` will be ignored by this plugin, i.e. `goto()` will transition to whichever step is
-the target.
-
 In practice what happens is that when each substep is stepped through via `next()` calls, a
 `class="substep-visible"` class is added to the element. It is up to the presentation author to
 use the appropriate CSS to make the substeps hidden and visible.
 
+The following options are available and may be specified on the step element:
+
+* `data-substep-active`
+  With this option the first substep is considered part of the initial state of a step, i.e.
+  it will be displayed immediately, and it will not be hidden before leaving to the previous step.
+
+* `data-substep-prev-mode="restart|rewind"` (default: `"rewind"`)
+  This option controls the behavior of the start of substeps when moving to this step via `prev()`.
+  With `"restart"` the sequence starts with the first substep, just like when entering via `next()`,
+  with `"rewind"` all substeps are initially visible and the last substep is activated.
+
 Example:
 
-        <style type="text/css">
-            .substep { opacity: 0; }
-            .substep.substep-visible { opacity: 1; transition: opacity 1s; }
-        </style>
+```html
+<style type="text/css">
+    .substep { opacity: 0; }
+    .substep.substep-visible { opacity: 1; transition: opacity 1s; }
+</style>
 
-        <div class="step">
-            <h1>Fruits</h1>
-            <p class="substep">Orange</p>
-            <p class="substep">Apple</p>
-        </div>
+<div class="step">
+    <h1>Fruits</h1>
+    <p class="substep">Orange</p>
+    <p class="substep">Apple</p>
+</div>
+
+<div class="step" data-substep-active data-substep-prev-mode="restart">
+    <h1>Vegetables</h1>
+    <p class="substep">Salad</p>
+    <p class="substep" data-substep-order="2">Carrot</p>
+    <p class="substep" data-substep-order="1">Cucumber</p>
+</div>
+```
 
 Classes:
 
-`substep-active` - The most recent substep in the current step
+* `substep-active` - The most recent substep in the current step
 
-`substep-visible` - The most recent and all previous substeps in the current step
+* `substep-visible` - The most recent and all previous substeps in the current step
 
 Author
 ------

@@ -18,9 +18,28 @@
     };
 
     var activeStep = null;
-    document.addEventListener( "impress:stepenter", function( event ) {
-        activeStep = event.target;
-    }, false );
+
+    var stepenterHandler = function( event ) {
+        var step = event.target;
+
+        // The only relevant case where the preStepLeave callback is not invoked
+        // is a "goto" event (e.g. on reload), therefore handle it here.
+        if ( event.detail.reason === "goto" && !event.detail.next && !event.detail.prev ) {
+            activeStep = step;
+
+            // Reset the step
+            resetAllSubsteps( step, false );
+
+            if ( "substepActive" in step.dataset ) {
+                var el = showSubstepIfAny( step );
+                if ( el ) {
+                    triggerEvent( step, "impress:substep:enter",
+                                  { reason: "next", substep: el } );
+                }
+            }
+        }
+    };
+    document.addEventListener( "impress:stepenter", stepenterHandler, false );
 
     var substep = function( event ) {
         if ( ( !event ) || ( !event.target ) ) {
@@ -28,33 +47,104 @@
         }
 
         var step = event.target;
-        var el; // Needed by jshint
+        var nextStep = event.detail.next;
+        var abortEvent = false;
+
+        var el;
         if ( event.detail.reason === "next" ) {
             el = showSubstepIfAny( step );
             if ( el ) {
+                abortEvent = true;
+            } else {
+                resetAllSubsteps( nextStep, false );
 
-                // Send a message to others, that we aborted a stepleave event.
-                triggerEvent( step, "impress:substep:stepleaveaborted",
-                              { reason: "next", substep: el } );
-
-                // Autoplay uses this for reloading itself
-                triggerEvent( step, "impress:substep:enter",
-                              { reason: "next", substep: el } );
-
-                // Returning false aborts the stepleave event
-                return false;
+                // If requested via "data-substep-active" attribute, active the
+                // first substep(s) immediately
+                if ( "substepActive" in nextStep.dataset ) {
+                    el = showSubstepIfAny( nextStep );
+                    if ( el ) {
+                        triggerEvent( nextStep, "impress:substep:enter",
+                                      { reason: "next", substep: el } );
+                    }
+                }
             }
-        }
-        if ( event.detail.reason === "prev" ) {
+
+        } else if ( event.detail.reason === "prev" ) {
             el = hideSubstepIfAny( step );
             if ( el ) {
-                triggerEvent( step, "impress:substep:stepleaveaborted",
-                              { reason: "prev", substep: el } );
+                abortEvent = true;
+            } else {
 
-                triggerEvent( step, "impress:substep:leave",
-                              { reason: "prev", substep: el } );
+                // Consider the option data-substep-prev-mode="restart|rewind"
+                if ( ( "substepPrevMode" in nextStep.dataset ) &&
+                     ( nextStep.dataset.substepPrevMode === "restart" ) ) {
+                    restartStep( nextStep );
+                } else {
+                    rewindStep( nextStep );
+                }
+            }
 
-                return false;
+        } else if ( event.detail.reason === "goto" ) {
+            resetAllSubsteps( step, true );
+
+            // Prepare next step
+            var newEvent = { target: nextStep, detail: { reason: event.detail.reason } };
+            stepenterHandler( newEvent );
+            return;
+        }
+
+        if ( abortEvent )
+        {
+            activeStep = step;
+            var detail = { reason: event.detail.reason, substep: el };
+            triggerEvent( step, "impress:substep:stepleaveaborted", detail );
+            triggerEvent( step, "impress:substep:leave", detail );
+            return false;
+        } else {
+            activeStep = nextStep;
+        }
+    };
+
+    var restartStep = function( step ) {
+
+        // Make all substeps invisible
+        resetAllSubsteps( step, false );
+
+        // If requested via "data-substep-active" attribute, active the
+        // first substep(s) immediately
+        if ( "substepActive" in step.dataset ) {
+            var el = showSubstepIfAny( step );
+            if ( el ) {
+                triggerEvent( step, "impress:substep:enter",
+                              { reason: "next", substep: el } );
+            }
+        }
+    };
+
+    var rewindStep = function( step ) {
+
+        // Make all substeps visible, activate the last one
+        resetAllSubsteps( step, true );
+        hideSubstepIfAny( step );
+    };
+
+    var resetAllSubsteps = function( step, makeVisible ) {
+        var i;
+        var substeps;
+        if ( makeVisible ) {
+            substeps = step.querySelectorAll( ".substep" );
+            if ( substeps.length > 0 ) {
+                for ( i = 0; i < substeps.length; i++ ) {
+                    substeps[ i ].classList.remove( "substep-active" );
+                    substeps[ i ].classList.add( "substep-visible" );
+                }
+            }
+         } else {
+            substeps = step.querySelectorAll( ".substep-active, .substep-visible" );
+            if ( substeps.length > 0 ) {
+                for ( i = 0; i < substeps.length; i++ ) {
+                    substeps[ i ].classList.remove( "substep-active", "substep-visible" );
+                }
             }
         }
     };
@@ -84,30 +174,26 @@
     };
 
     var showSubstep = function( substeps, visible ) {
+        var i;
+        for ( i = 0; i < substeps.length; i++ ) {
+            substeps[ i ].classList.remove( "substep-active" );
+        }
         if ( visible.length < substeps.length ) {
-            for ( var i = 0; i < substeps.length; i++ ) {
-                substeps[ i ].classList.remove( "substep-active" );
-            }
+            var el = substeps[ visible.length ];
+            el.classList.add( "substep-visible", "substep-active" );
 
-            // Loop over all substeps that are not yet visible and set
-            //   those of currentSubstepOrder to visible and active
-            var el;
-            var currentSubstepOrder;
-            for ( var j = visible.length; j < substeps.length; j++ ) {
-                if ( currentSubstepOrder &&
-                    currentSubstepOrder !== substeps[ j ].dataset.substepOrder ) {
-
-                    // Stop if the substepOrder is greater
-                    break;
-                }
-                el = substeps[ j ];
-                currentSubstepOrder = el.dataset.substepOrder;
-                el.classList.add( "substep-visible" );
-                el.classList.add( "substep-active" );
-                if ( currentSubstepOrder === undefined ) {
-
-                    // Stop after one substep as default order
-                    break;
+            // Continue if there is another substep with the same substepOrder
+            if ( visible.length + 1 < substeps.length ) {
+                var referenceOrder = el.dataset.substepOrder;
+                if ( referenceOrder !== undefined ) {
+                    for ( i = visible.length + 1; i < substeps.length; i++ ) {
+                        el = substeps[ i ];
+                        if ( el.dataset.substepOrder === referenceOrder ) {
+                            el.classList.add( "substep-visible", "substep-active" );
+                        } else {
+                            break;
+                        }
+                    }
                 }
             }
 
@@ -117,35 +203,59 @@
 
     var hideSubstepIfAny = function( step ) {
         var substeps = step.querySelectorAll( ".substep" );
-        var visible = step.querySelectorAll( ".substep-visible" );
-        var sorted = sortSubsteps( visible );
         if ( substeps.length > 0 ) {
-            return hideSubstep( sorted );
+            var visible = step.querySelectorAll( ".substep-visible" );
+            var sorted = sortSubsteps( visible );
+            return hideSubstep( step, sorted );
         }
     };
 
-    var hideSubstep = function( visible ) {
+    var hideSubstep = function( step, visible ) {
         if ( visible.length > 0 ) {
-            var current = -1;
-            for ( var i = 0; i < visible.length; i++ ) {
-                if ( visible[ i ].classList.contains( "substep-active" ) ) {
-                    current = i;
-                }
-                visible[ i ].classList.remove( "substep-active" );
-            }
-            if ( current > 0 ) {
-                visible[ current - 1 ].classList.add( "substep-active" );
-            }
-            var el = visible[ visible.length - 1 ];
-            el.classList.remove( "substep-visible" );
+            var firstActive = -1;
+            var i;
+            var el;
 
-            // Continue if there is another substep with the same substepOrder
-            if ( current > 0 &&
-                visible[ current - 1 ].dataset.substepOrder ===
-                visible[ current ].dataset.substepOrder ) {
-                visible.pop();
-                return hideSubstep( visible );
+            // Find the first active substep and inactivate all active substeps
+            for ( i = 0; i < visible.length; i++ ) {
+                if ( visible[ i ].classList.contains( "substep-active" ) ) {
+                    if ( firstActive < 0 ) {
+                        firstActive = i;
+                    }
+                    el = visible[ i ];
+                    el.classList.remove( "substep-active", "substep-visible" );
+                }
             }
+
+            if ( firstActive < 0 ) {
+
+                // There was no active substep, so just prepare for
+                // marking the last substep(s) as active
+                firstActive = visible.length;
+            }
+
+            if ( firstActive > 0 ) {
+                var newActiveSubstep = visible[ firstActive - 1 ];
+                newActiveSubstep.classList.add( "substep-active" );
+
+                // Continue if there is another substep with the same substepOrder
+                var referenceOrder = newActiveSubstep.dataset.substepOrder;
+                if ( referenceOrder !== undefined ) {
+                    for ( i = firstActive - 1; i >= 0; i-- ) {
+                        if ( visible[ i ].dataset.substepOrder === referenceOrder ) {
+                            visible[ i ].classList.add( "substep-active" );
+                        } else {
+                            break;
+                        }
+                    }
+                }
+            } else if ( "substepActive" in step.dataset ) {
+
+                // First substep is active
+                el = undefined;
+            }
+
+            // Return the top-most substep to be consistent with the showSubstep() result.
             return el;
         }
     };
@@ -153,16 +263,6 @@
     // Register the plugin to be called in pre-stepleave phase.
     // The weight makes this plugin run before other preStepLeave plugins.
     window.impress.addPreStepLeavePlugin( substep, 1 );
-
-    // When entering a step, in particular when re-entering, make sure that all substeps are hidden
-    // at first
-    document.addEventListener( "impress:stepenter", function( event ) {
-        var step = event.target;
-        var visible = step.querySelectorAll( ".substep-visible" );
-        for ( var i = 0; i < visible.length; i++ ) {
-            visible[ i ].classList.remove( "substep-visible" );
-        }
-    }, false );
 
     // API for others to reveal/hide next substep ////////////////////////////////////////////////
     document.addEventListener( "impress:substep:show", function() {

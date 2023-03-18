@@ -258,20 +258,22 @@
         // We sometimes call `goto`, and therefore `onStepEnter`, just to redraw a step, such as
         // after screen resize. In this case - more precisely, in any case - we trigger a
         // `impress:steprefresh` event.
-        var onStepEnter = function( step ) {
-            if ( lastEntered !== step ) {
-                lib.util.triggerEvent( step, "impress:stepenter" );
-                lastEntered = step;
+        var onStepEnter = function( currentStep, prevStep, reason ) {
+            if ( lastEntered !== currentStep ) {
+                lib.util.triggerEvent( currentStep, "impress:stepenter",
+                                       { prev: prevStep, reason: reason } );
+                lastEntered = currentStep;
             }
-            lib.util.triggerEvent( step, "impress:steprefresh" );
+            lib.util.triggerEvent( currentStep, "impress:steprefresh" );
         };
 
         // `onStepLeave` is called whenever the currentStep element is left
         // but the event is triggered only if the currentStep is the same as
         // lastEntered step.
-        var onStepLeave = function( currentStep, nextStep ) {
+        var onStepLeave = function( currentStep, nextStep, reason ) {
             if ( lastEntered === currentStep ) {
-                lib.util.triggerEvent( currentStep, "impress:stepleave", { next: nextStep } );
+                lib.util.triggerEvent( currentStep, "impress:stepleave",
+                                       { next: nextStep, reason: reason } );
                 lastEntered = null;
             }
         };
@@ -527,7 +529,7 @@
 
             // Trigger leave of currently active element (if it's not the same step again)
             if ( activeStep && activeStep !== el ) {
-                onStepLeave( activeStep, el );
+                onStepLeave( activeStep, el, reason );
             }
 
             // Now we alter transforms of `root` and `canvas` to trigger transitions.
@@ -578,6 +580,7 @@
 
             // Store current state
             currentState = target;
+            var prevStep = activeStep;
             activeStep = el;
 
             // And here is where we trigger `impress:stepenter` event.
@@ -598,7 +601,7 @@
             // http://github.com/bartaz/impress.js/blob/0.5.2/js/impress.js
             window.clearTimeout( stepEnterTimeout );
             stepEnterTimeout = window.setTimeout( function() {
-                onStepEnter( activeStep );
+                onStepEnter( activeStep, prevStep, reason );
             }, duration + delay );
 
             return el;
