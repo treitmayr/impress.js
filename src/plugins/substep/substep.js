@@ -150,12 +150,12 @@
     window.impress.addPreStepLeavePlugin( substep, 1 );
 
     // When entering a step, in particular when re-entering, make sure that all substeps are hidden
-    // at first
+    // and inactive at first
     document.addEventListener( "impress:stepenter", function( event ) {
         var step = event.target;
-        var visible = step.querySelectorAll( ".substep-visible" );
+        var visible = step.querySelectorAll( ".substep-visible, .substep-active" );
         for ( var i = 0; i < visible.length; i++ ) {
-            visible[ i ].classList.remove( "substep-visible" );
+            visible[ i ].classList.remove( "substep-visible", "substep-active" );
         }
     }, false );
 
