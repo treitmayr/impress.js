@@ -78,7 +78,7 @@
         // it into a number. If it is not possible it returns 0 (or other value
         // given as `fallback`).
         var toNumber = function( numeric, fallback ) {
-            return isNaN( numeric ) ? ( fallback || 0 ) : Number( numeric );
+            return ( ( numeric == null ) || isNaN( numeric ) ) ? ( fallback || 0 ) : Number( numeric );
         };
 
         /**

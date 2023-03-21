@@ -54,8 +54,173 @@
     var toNumber;
     var toNumberAdvanced;
 
-    var computeRelativePositions = function( el, prev ) {
+    // Parse the `alignment` string according to `result` and consider
+    // keys excluding each other (the last key wins).
+    var parseAlignmentString = function( alignment, result, exclusives ) {
+        var words = alignment.split(/[-+_ \t\/,.;:]+/);
+        words.forEach( w => {
+            if ( w in result ) {
+                result[ w ] = true;
+            } else {
+                window.console.warn( "Skipping unknown alignment '" + w +
+                                     "' from alignment string '" + alignment + "'" );
+            }
+
+            // Clear any competing keys
+            exclusives.filter( exs => exs.includes( w ) )
+                      .forEach( exs => exs.filter( e => e !== w )
+                                          .forEach( e => result[ e ] = false ) );
+        } );
+    };
+
+    // Parse the alignment arguments and optionally apply a default value
+    var computeAlignment = function( alignmentX, alignmentY, defaultX, defaultY ) {
+
+        // process X alignment
+        var resultX;
+        if ( alignmentX != null ) {
+            alignmentX = alignmentX.trim().toLowerCase();
+            if ( (alignmentX.length > 0) && ( alignmentX !== "off" ) ) {
+                resultX = { left:false, right:false, mid:true, in:true, out:false };
+                parseAlignmentString( alignmentX, resultX, [ [ "left", "right", "mid" ],
+                                                             [ "in", "out" ] ] );
+            }
+        } else if ( defaultX != null ) {
+            resultX = Object.assign( {}, defaultX );
+        }
+
+        // process Y alignment
+        var resultY;
+        if ( alignmentY != null ) {
+            alignmentY = alignmentY.trim().toLowerCase();
+            if ( (alignmentY.length > 0) && ( alignmentY !== "off" ) ) {
+                resultY = { top:false, bottom:false, mid:true, in:true, out:false };
+                parseAlignmentString( alignmentY, resultY, [ [ "top", "bottom", "mid" ],
+                                                             [ "in", "out" ] ] );
+            }
+        } else if ( defaultY != null ) {
+            resultY = Object.assign( {}, defaultY );
+        }
+
+        var result = { x:resultX, y:resultY };
+        return result;
+    };
+
+    /* Adjust `el` according to its alignment settings in `step` relative to `ref`.
+       Small refresher: CSS computed width/height includes paddings, border, but no margins.
+    */
+    var applyAlignment = function( el, step, ref ) {
+
+        if ( !ref ) {
+            return;
+        }
+
+        var align = step.relative.align;
+
+        if ( align.x || align.y ) {
+            var scaleRef = toNumber( ref.getAttribute( "data-scale" ), 1 );
+            var scaleEl  = toNumber(  el.getAttribute( "data-scale" ), 1 );
+            var styleRef = window.getComputedStyle( ref );
+            var styleEl  = window.getComputedStyle( el );
+            var diff = { x:0, y:0 };
+            var halfWidthRef;
+            var halfWidthEl;
+            var halfHeightRef;
+            var halfHeightEl;
+            var adjustment;
+            var collapsedMargin;
+
+            if ( align.x ) {
+                var marginLeftRef = parseFloat( styleRef.marginLeft );
+                var marginLeftEl = parseFloat( styleEl.marginLeft );
+
+                // Fix origin to "mid" position first
+                // Note: Margins are not(!) scaled via CSS transform
+                //       (also see https://stackoverflow.com/a/48686059)
+                diff.x = marginLeftRef - marginLeftEl;
+
+                // Inside X position, only take padding into account, not border or margin
+                if ( align.x.in ) {
+                    if ( align.x.left || align.x.right ) {
+                        halfWidthRef = ( parseFloat( styleRef.width ) -
+                                         parseFloat( styleRef.borderLeftWidth ) -
+                                         parseFloat( styleRef.borderRightWidth ) ) * scaleRef / 2;
+                        halfWidthEl  = parseFloat( styleEl.width ) * scaleEl / 2;
+                        adjustment = halfWidthRef - halfWidthEl;
+                        diff.x += align.x.left ? -adjustment : adjustment;
+                    }
+
+                // Outside X position, take margin into account
+                } else if ( align.x.out ) {
+                    if ( align.x.left || align.x.right ) {
+                        halfWidthRef = parseFloat( styleRef.width ) * scaleRef / 2;
+                        halfWidthEl  = parseFloat( styleEl.width ) * scaleEl / 2;
+                        adjustment = halfWidthRef + halfWidthEl;
+                        if ( align.x.left ) {
+                            collapsedMargin = Math.max( parseFloat( styleRef.marginLeft ) * scaleRef,
+                                                        parseFloat( styleEl.marginRight ) * scaleEl );
+                            diff.x -= adjustment + collapsedMargin;
+                        } else {
+                            collapsedMargin = Math.max( parseFloat( styleRef.marginRight ) * scaleRef,
+                                                        parseFloat( styleEl.marginLeft ) * scaleEl );
+                            diff.x += adjustment + collapsedMargin;
+                        }
+                    }
+                }
+            }
+
+            if ( align.y ) {
+                var marginTopRef = parseInt( styleRef.marginTop );
+                var marginTopEl = parseInt( styleEl.marginTop );
+
+                // Fix origin to "mid" position first
+                diff.y = marginTopRef - marginTopEl;
+
+                // Inside Y position, only take padding into account, not border or margin
+                if ( align.y.in ) {
+                    if ( align.y.top || align.y.bottom ) {
+                        halfHeightRef = ( parseFloat( styleRef.height ) -
+                                          parseFloat( styleRef.borderTopWidth ) -
+                                          parseFloat( styleRef.borderBottomWidth ) ) * scaleRef / 2;
+                        halfHeightEl  = parseFloat( styleEl.height ) * scaleEl / 2;
+                        adjustment = halfHeightRef - halfHeightEl;
+                        diff.y += align.y.top ? -adjustment : adjustment;
+                    }
+
+                // Outside Y position, take margin into account
+                } else if ( align.y.out ) {
+                    if ( align.y.top || align.y.bottom ) {
+                        halfHeightRef = parseFloat( styleRef.height ) * scaleRef / 2;
+                        halfHeightEl  = parseFloat( styleEl.height ) * scaleEl / 2;
+                        adjustment = halfHeightRef + halfHeightEl;
+                        if ( align.y.top ) {
+                            collapsedMargin = Math.max( parseFloat( styleRef.marginTop ) * scaleRef,
+                                                        parseFloat( styleEl.marginBottom ) * scaleEl );
+                            diff.y -= adjustment + collapsedMargin;
+                        } else {
+                            collapsedMargin = Math.max( parseFloat( styleRef.marginBottom ) * scaleRef,
+                                                        parseFloat( styleEl.marginTop ) * scaleEl );
+                            diff.y += adjustment + collapsedMargin;
+                        }
+                    }
+                }
+            }
+
+            // Apply the changes to the step's coordinates
+            step.x += diff.x;
+            step.y += diff.y;
+        }
+    };
+
+    var computeRelativePositions = function( el, prevEl, prev ) {
         var data = el.dataset;
+
+        /*
+        // This makes debugging a LOT easier, otherwise prev will be overwritten
+        if ( prev ) {
+            prev = JSON.parse(JSON.stringify(prev));
+        }
+        */
 
         if ( !prev ) {
 
@@ -66,12 +231,13 @@
                 relative: {
                     position: "absolute",
                     x:0, y:0, z:0,
-                    rotate: { x:0, y:0, z:0, order:"xyz" }
+                    rotate: { x:0, y:0, z:0, order:"xyz" },
+                    align: computeAlignment()
                 }
             };
         }
 
-        var ref = prev;
+        var ref = prevEl;
         if ( data.relTo ) {
 
             ref = document.getElementById( data.relTo );
@@ -93,7 +259,8 @@
                         prev.relative = {
                             position: "absolute",
                             x:0, y:0, z:0,
-                            rotate: { x:0, y:0, z:0, order:"xyz" }
+                            rotate: { x:0, y:0, z:0, order:"xyz" },
+                            align: computeAlignment()
                         };
                     } else {
 
@@ -115,7 +282,9 @@
                                 y: toNumberAdvanced( ref.getAttribute( "data-rel-rotate-y" ), 0 ),
                                 z: toNumberAdvanced( ref.getAttribute( "data-rel-rotate-z" ), 0 ),
                                 order: ( ref.getAttribute( "data-rel-rotate-order" ) ||  "xyz" )
-                            }
+                            },
+                            align: computeAlignment( ref.getAttribute( "data-rel-align-x" ),
+                                                     ref.getAttribute( "data-rel-align-y" ) )
                         };
                     }
                 } else {
@@ -154,7 +323,9 @@
             prev.relative = {
                 position: prev.relative.position,
                 x:0, y:0, z:0,
-                rotate: { x:0, y:0, z:0, order: "xyz" } };
+                rotate: { x:0, y:0, z:0, order: "xyz" },
+                align: computeAlignment()
+            };
 
             if ( data.relReset === "all" ) {
                 inheritRotation = false;
@@ -181,7 +352,9 @@
                         y: toNumber( data.relRotateY, prev.relative.rotate.y ),
                         z: toNumber( data.relRotateZ, prev.relative.rotate.z ),
                         order: data.rotateOrder || "xyz"
-                    }
+                    },
+                    align: computeAlignment( data.relAlignX, data.relAlignY,
+                                             prev.relative.align.x, prev.relative.align.y )
                 }
             };
 
@@ -204,9 +377,11 @@
         // Note that this also has the effect of resetting any inherited relative values.
         if ( data.x !== undefined ) {
             relative.x = step.relative.x = 0;
+            step.relative.align.x = computeAlignment().x;
         }
         if ( data.y !== undefined ) {
             relative.y = step.relative.y = 0;
+            step.relative.align.y = computeAlignment().y;
         }
         if ( data.z !== undefined ) {
             relative.z = step.relative.z = 0;
@@ -220,6 +395,8 @@
         if ( data.rotateZ !== undefined || data.rotate !== undefined || !inheritRotation ) {
             relative.rotate.z = step.relative.rotate.z = 0;
         }
+
+        applyAlignment( el, step, ref );
 
         step.x = step.x + relative.x;
         step.y = step.y + relative.y;
@@ -238,6 +415,7 @@
 
         var steps = root.querySelectorAll( ".step" );
         var prev;
+        var prevEl;
         startingState[ root.id ] = [];
         for ( var i = 0; i < steps.length; i++ ) {
             var el = steps[ i ];
@@ -259,7 +437,7 @@
                 relPosition: el.getAttribute( "data-rel-position" ),
                 rotateOrder: el.getAttribute( "data-rotate-order" )
             } );
-            var step = computeRelativePositions( el, prev );
+            var step = computeRelativePositions( el, prevEl, prev );
 
             // Apply relative position (if non-zero)
             el.setAttribute( "data-x", step.x );
@@ -277,6 +455,7 @@
             el.setAttribute( "data-rel-rotate-y", step.relative.rotate.y );
             el.setAttribute( "data-rel-rotate-z", step.relative.rotate.z );
             prev = step;
+            prevEl = el;
         }
     };
 
@@ -317,4 +496,3 @@
         } );
     }, false );
 } )( document, window );
-

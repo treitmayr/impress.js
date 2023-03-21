@@ -8,7 +8,7 @@
  * in modern browsers and inspired by the idea behind prezi.com.
  *
  *
- * Copyright 2011-2012 Bartek Szopka (@bartaz), 2016-2023 Henrik Ingo (@henrikingo) 
+ * Copyright 2011-2012 Bartek Szopka (@bartaz), 2016-2023 Henrik Ingo (@henrikingo)
  * and 70+ other contributors
  *
  * Released under the MIT License.
@@ -1246,7 +1246,7 @@
         // it into a number. If it is not possible it returns 0 (or other value
         // given as `fallback`).
         var toNumber = function( numeric, fallback ) {
-            return isNaN( numeric ) ? ( fallback || 0 ) : Number( numeric );
+            return ( ( numeric == null ) || isNaN( numeric ) ) ? ( fallback || 0 ) : Number( numeric );
         };
 
         /**
@@ -3757,6 +3757,7 @@
         // So you don't event need to know what is the id of the root element
         // or anything. `impress:init` event data gives you everything you
         // need to control the presentation that was just initialized.
+        var root = event.target;
         var api = event.detail.api;
         var gc = api.lib.gc;
         var util = api.lib.util;
@@ -3836,71 +3837,130 @@
             }
         }, false );
 
-        // Delegated handler for clicking on the links to presentation steps
-        gc.addEventListener( document, "click", function( event ) {
-
-            // Event delegation with "bubbling"
-            // check if event target (or any of its parents is a link)
-            var target = event.target;
-            try {
-                while ( ( target.tagName !== "A" ) &&
-                        ( target !== document.documentElement ) ) {
-                    target = target.parentNode;
-                }
-
-                if ( target.tagName === "A" ) {
-                    var href = target.getAttribute( "href" );
-
-                    // If it's a link to presentation step, target this step
-                    if ( href && href[ 0 ] === "#" ) {
-                        target = document.getElementById( href.slice( 1 ) );
+        // Try to find a hyperlink with a step id and go to this step
+        var processHyperlink = function( targets ) {
+            var link = targets.find( el => el.tagName === "A" );
+            if ( link && link.hasAttribute( "href" ) ) {
+                var href = link.getAttribute( "href" );
+                var match = href.match( /^#\/?(.+)/ );
+                if ( match !== null ) {
+                    var stepId = match[ 1 ];
+                    if ( api.goto( stepId ) ) {
+                        return true;
                     }
                 }
+            }
+        };
 
-                if ( api.goto( target ) ) {
-                    event.stopImmediatePropagation();
-                    event.preventDefault();
+        // Try to find an inactive step in the provided list and go there
+        var processInactiveStep = function( targets ) {
+            var step = targets.find( el =>  el.classList.contains( "step" ) &&
+                                           !el.classList.contains( "active" ) );
+            if ( step ) {
+                if ( api.goto( step ) ) {
+                    return true;
                 }
             }
-            catch ( err ) {
+        };
 
-                // For example, when clicking on the button to launch speaker console, the button
-                // is immediately deleted from the DOM. In this case target is a DOM element when
-                // we get it, but turns out to be null if you try to actually do anything with it.
-                if ( err instanceof TypeError &&
-                     err.message === "target is null" ) {
-                    return;
+        var windowHasFocus = document.hasFocus();
+        var focusTimer;
+
+        gc.addEventListener( document, "blur", function( event ) {
+            window.clearTimeout( focusTimer );
+            windowHasFocus = false;
+        } );
+        gc.addEventListener( document, "focus", function( event ) {
+            focusTimer = window.setTimeout( () => { windowHasFocus = true; }, 100 );
+        } );
+
+        var singleClickTimer = null;
+        var singleClickTimerCallback;
+
+        var noModifierKeysPressed = function( event ) {
+            return !( event.ctrlKey || event.shiftKey || event.altKey );
+        }
+
+        // Delegated handler for clicking on the links to presentation steps
+        gc.addEventListener( document, "click", function( event ) {
+            window.console.log( "click event", event.detail );
+
+            // Skip clicks when
+            // * just focusing the browser, or
+            // * any modifier keys pressed
+            // * multiclick (e.g. double-click), or
+            if ( !windowHasFocus ||
+                 !noModifierKeysPressed( event ) ||
+                 ( event.detail !== 1 ) ) {
+                window.console.log( "abort click processing", windowHasFocus, event.detail );
+                return;
+            }
+
+            // Check if there is a pending click timer and execute handler right away
+            if ( singleClickTimer !== null ) {
+                window.clearTimeout( singleClickTimer );
+                singleClickTimer = null;
+                window.console.log( "invoke timer callback prematurely" );
+                singleClickTimerCallback();
+            }
+
+            singleClickTimerCallback = function() {
+                singleClickTimer = null;
+                try {
+                    window.console.log( "timer callback executing" );
+                    window.console.log( "got click event at", event.clientX, event.clientY );
+                    window.console.log( "event", event );
+                    var targets = document.elementsFromPoint( event.clientX, event.clientY );
+                    window.console.log( "targets:", targets );
+
+                    // First try to find a hyperlink with a step id,
+                    // then an inactive step element
+                    if ( processHyperlink( targets ) ) {
+                        event.stopImmediatePropagation();
+                        event.preventDefault();
+                    } else if ( processInactiveStep( targets ) ) {
+                        event.preventDefault();
+                    }
                 }
-                throw err;
+                catch ( err ) {
+
+                    // For example, when clicking on the button to launch speaker console,
+                    // the button is immediately deleted from the DOM. In this case target
+                    // is a DOM element when we get it, but turns out to be null if you
+                    // try to actually do anything with it.
+                    if ( err instanceof TypeError &&
+                         err.message === "target is null" ) {
+                        return;
+                    }
+                    throw err;
+                }
+            };
+
+            window.console.log( "start timer callback" );
+            singleClickTimer = window.setTimeout( singleClickTimerCallback, 300 );
+        }, false );
+
+        // Prevent text selection during double click
+        gc.addEventListener( document, "mousedown", function( event ) {
+            if ( ( event.detail > 1 ) && noModifierKeysPressed( event ) ) {
+                event.preventDefault();
             }
         }, false );
 
-        // Delegated handler for clicking on step elements
-        gc.addEventListener( document, "click", function( event ) {
-            var target = event.target;
-            try {
-
-                // Find closest step element that is not active
-                while ( !( target.classList.contains( "step" ) &&
-                        !target.classList.contains( "active" ) ) &&
-                        ( target !== document.documentElement ) ) {
-                    target = target.parentNode;
-                }
-
-                if ( api.goto( target ) ) {
-                    event.preventDefault();
-                }
+        // Delegated handler for double-clicking to next/previous step
+        gc.addEventListener( document, "dblclick", function( event ) {
+            if ( singleClickTimer !== null ) {
+                window.console.log( "cancel timer callback" );
+                window.clearTimeout( singleClickTimer );
+                singleClickTimer = null;
             }
-            catch ( err ) {
-
-                // For example, when clicking on the button to launch speaker console, the button
-                // is immediately deleted from the DOM. In this case target is a DOM element when
-                // we get it, but turns out to be null if you try to actually do anything with it.
-                if ( err instanceof TypeError &&
-                     err.message === "target is null" ) {
-                    return;
+            window.console.log( "got dblclick event at", event.clientX, event.clientY );
+            if ( noModifierKeysPressed( event ) ) {
+                if ( event.clientX < window.screen.width / 2 ) {
+                    api.prev();
+                } else {
+                    api.next();
                 }
-                throw err;
             }
         }, false );
 
@@ -4182,8 +4242,173 @@
     var toNumber;
     var toNumberAdvanced;
 
-    var computeRelativePositions = function( el, prev ) {
+    // Parse the `alignment` string according to `result` and consider
+    // keys excluding each other (the last key wins).
+    var parseAlignmentString = function( alignment, result, exclusives ) {
+        var words = alignment.split(/[-+_ \t\/,.;:]+/);
+        words.forEach( w => {
+            if ( w in result ) {
+                result[ w ] = true;
+            } else {
+                window.console.warn( "Skipping unknown alignment '" + w +
+                                     "' from alignment string '" + alignment + "'" );
+            }
+
+            // Clear any competing keys
+            exclusives.filter( exs => exs.includes( w ) )
+                      .forEach( exs => exs.filter( e => e !== w )
+                                          .forEach( e => result[ e ] = false ) );
+        } );
+    };
+
+    // Parse the alignment arguments and optionally apply a default value
+    var computeAlignment = function( alignmentX, alignmentY, defaultX, defaultY ) {
+
+        // process X alignment
+        var resultX;
+        if ( alignmentX != null ) {
+            alignmentX = alignmentX.trim().toLowerCase();
+            if ( (alignmentX.length > 0) && ( alignmentX !== "off" ) ) {
+                resultX = { left:false, right:false, mid:true, in:true, out:false };
+                parseAlignmentString( alignmentX, resultX, [ [ "left", "right", "mid" ],
+                                                             [ "in", "out" ] ] );
+            }
+        } else if ( defaultX != null ) {
+            resultX = Object.assign( {}, defaultX );
+        }
+
+        // process Y alignment
+        var resultY;
+        if ( alignmentY != null ) {
+            alignmentY = alignmentY.trim().toLowerCase();
+            if ( (alignmentY.length > 0) && ( alignmentY !== "off" ) ) {
+                resultY = { top:false, bottom:false, mid:true, in:true, out:false };
+                parseAlignmentString( alignmentY, resultY, [ [ "top", "bottom", "mid" ],
+                                                             [ "in", "out" ] ] );
+            }
+        } else if ( defaultY != null ) {
+            resultY = Object.assign( {}, defaultY );
+        }
+
+        var result = { x:resultX, y:resultY };
+        return result;
+    };
+
+    /* Adjust `el` according to its alignment settings in `step` relative to `ref`.
+       Small refresher: CSS computed width/height includes paddings, border, but no margins.
+    */
+    var applyAlignment = function( el, step, ref ) {
+
+        if ( !ref ) {
+            return;
+        }
+
+        var align = step.relative.align;
+
+        if ( align.x || align.y ) {
+            var scaleRef = toNumber( ref.getAttribute( "data-scale" ), 1 );
+            var scaleEl  = toNumber(  el.getAttribute( "data-scale" ), 1 );
+            var styleRef = window.getComputedStyle( ref );
+            var styleEl  = window.getComputedStyle( el );
+            var diff = { x:0, y:0 };
+            var halfWidthRef;
+            var halfWidthEl;
+            var halfHeightRef;
+            var halfHeightEl;
+            var adjustment;
+            var collapsedMargin;
+
+            if ( align.x ) {
+                var marginLeftRef = parseFloat( styleRef.marginLeft );
+                var marginLeftEl = parseFloat( styleEl.marginLeft );
+
+                // Fix origin to "mid" position first
+                // Note: Margins are not(!) scaled via CSS transform
+                //       (also see https://stackoverflow.com/a/48686059)
+                diff.x = marginLeftRef - marginLeftEl;
+
+                // Inside X position, only take padding into account, not border or margin
+                if ( align.x.in ) {
+                    if ( align.x.left || align.x.right ) {
+                        halfWidthRef = ( parseFloat( styleRef.width ) -
+                                         parseFloat( styleRef.borderLeftWidth ) -
+                                         parseFloat( styleRef.borderRightWidth ) ) * scaleRef / 2;
+                        halfWidthEl  = parseFloat( styleEl.width ) * scaleEl / 2;
+                        adjustment = halfWidthRef - halfWidthEl;
+                        diff.x += align.x.left ? -adjustment : adjustment;
+                    }
+
+                // Outside X position, take margin into account
+                } else if ( align.x.out ) {
+                    if ( align.x.left || align.x.right ) {
+                        halfWidthRef = parseFloat( styleRef.width ) * scaleRef / 2;
+                        halfWidthEl  = parseFloat( styleEl.width ) * scaleEl / 2;
+                        adjustment = halfWidthRef + halfWidthEl;
+                        if ( align.x.left ) {
+                            collapsedMargin = Math.max( parseFloat( styleRef.marginLeft ) * scaleRef,
+                                                        parseFloat( styleEl.marginRight ) * scaleEl );
+                            diff.x -= adjustment + collapsedMargin;
+                        } else {
+                            collapsedMargin = Math.max( parseFloat( styleRef.marginRight ) * scaleRef,
+                                                        parseFloat( styleEl.marginLeft ) * scaleEl );
+                            diff.x += adjustment + collapsedMargin;
+                        }
+                    }
+                }
+            }
+
+            if ( align.y ) {
+                var marginTopRef = parseInt( styleRef.marginTop );
+                var marginTopEl = parseInt( styleEl.marginTop );
+
+                // Fix origin to "mid" position first
+                diff.y = marginTopRef - marginTopEl;
+
+                // Inside Y position, only take padding into account, not border or margin
+                if ( align.y.in ) {
+                    if ( align.y.top || align.y.bottom ) {
+                        halfHeightRef = ( parseFloat( styleRef.height ) -
+                                          parseFloat( styleRef.borderTopWidth ) -
+                                          parseFloat( styleRef.borderBottomWidth ) ) * scaleRef / 2;
+                        halfHeightEl  = parseFloat( styleEl.height ) * scaleEl / 2;
+                        adjustment = halfHeightRef - halfHeightEl;
+                        diff.y += align.y.top ? -adjustment : adjustment;
+                    }
+
+                // Outside Y position, take margin into account
+                } else if ( align.y.out ) {
+                    if ( align.y.top || align.y.bottom ) {
+                        halfHeightRef = parseFloat( styleRef.height ) * scaleRef / 2;
+                        halfHeightEl  = parseFloat( styleEl.height ) * scaleEl / 2;
+                        adjustment = halfHeightRef + halfHeightEl;
+                        if ( align.y.top ) {
+                            collapsedMargin = Math.max( parseFloat( styleRef.marginTop ) * scaleRef,
+                                                        parseFloat( styleEl.marginBottom ) * scaleEl );
+                            diff.y -= adjustment + collapsedMargin;
+                        } else {
+                            collapsedMargin = Math.max( parseFloat( styleRef.marginBottom ) * scaleRef,
+                                                        parseFloat( styleEl.marginTop ) * scaleEl );
+                            diff.y += adjustment + collapsedMargin;
+                        }
+                    }
+                }
+            }
+
+            // Apply the changes to the step's coordinates
+            step.x += diff.x;
+            step.y += diff.y;
+        }
+    };
+
+    var computeRelativePositions = function( el, prevEl, prev ) {
         var data = el.dataset;
+
+        /*
+        // This makes debugging a LOT easier, otherwise prev will be overwritten
+        if ( prev ) {
+            prev = JSON.parse(JSON.stringify(prev));
+        }
+        */
 
         if ( !prev ) {
 
@@ -4194,12 +4419,13 @@
                 relative: {
                     position: "absolute",
                     x:0, y:0, z:0,
-                    rotate: { x:0, y:0, z:0, order:"xyz" }
+                    rotate: { x:0, y:0, z:0, order:"xyz" },
+                    align: computeAlignment()
                 }
             };
         }
 
-        var ref = prev;
+        var ref = prevEl;
         if ( data.relTo ) {
 
             ref = document.getElementById( data.relTo );
@@ -4221,7 +4447,8 @@
                         prev.relative = {
                             position: "absolute",
                             x:0, y:0, z:0,
-                            rotate: { x:0, y:0, z:0, order:"xyz" }
+                            rotate: { x:0, y:0, z:0, order:"xyz" },
+                            align: computeAlignment()
                         };
                     } else {
 
@@ -4243,7 +4470,9 @@
                                 y: toNumberAdvanced( ref.getAttribute( "data-rel-rotate-y" ), 0 ),
                                 z: toNumberAdvanced( ref.getAttribute( "data-rel-rotate-z" ), 0 ),
                                 order: ( ref.getAttribute( "data-rel-rotate-order" ) ||  "xyz" )
-                            }
+                            },
+                            align: computeAlignment( ref.getAttribute( "data-rel-align-x" ),
+                                                     ref.getAttribute( "data-rel-align-y" ) )
                         };
                     }
                 } else {
@@ -4282,7 +4511,9 @@
             prev.relative = {
                 position: prev.relative.position,
                 x:0, y:0, z:0,
-                rotate: { x:0, y:0, z:0, order: "xyz" } };
+                rotate: { x:0, y:0, z:0, order: "xyz" },
+                align: computeAlignment()
+            };
 
             if ( data.relReset === "all" ) {
                 inheritRotation = false;
@@ -4309,7 +4540,9 @@
                         y: toNumber( data.relRotateY, prev.relative.rotate.y ),
                         z: toNumber( data.relRotateZ, prev.relative.rotate.z ),
                         order: data.rotateOrder || "xyz"
-                    }
+                    },
+                    align: computeAlignment( data.relAlignX, data.relAlignY,
+                                             prev.relative.align.x, prev.relative.align.y )
                 }
             };
 
@@ -4332,9 +4565,11 @@
         // Note that this also has the effect of resetting any inherited relative values.
         if ( data.x !== undefined ) {
             relative.x = step.relative.x = 0;
+            step.relative.align.x = computeAlignment().x;
         }
         if ( data.y !== undefined ) {
             relative.y = step.relative.y = 0;
+            step.relative.align.y = computeAlignment().y;
         }
         if ( data.z !== undefined ) {
             relative.z = step.relative.z = 0;
@@ -4348,6 +4583,8 @@
         if ( data.rotateZ !== undefined || data.rotate !== undefined || !inheritRotation ) {
             relative.rotate.z = step.relative.rotate.z = 0;
         }
+
+        applyAlignment( el, step, ref );
 
         step.x = step.x + relative.x;
         step.y = step.y + relative.y;
@@ -4366,6 +4603,7 @@
 
         var steps = root.querySelectorAll( ".step" );
         var prev;
+        var prevEl;
         startingState[ root.id ] = [];
         for ( var i = 0; i < steps.length; i++ ) {
             var el = steps[ i ];
@@ -4387,7 +4625,7 @@
                 relPosition: el.getAttribute( "data-rel-position" ),
                 rotateOrder: el.getAttribute( "data-rotate-order" )
             } );
-            var step = computeRelativePositions( el, prev );
+            var step = computeRelativePositions( el, prevEl, prev );
 
             // Apply relative position (if non-zero)
             el.setAttribute( "data-x", step.x );
@@ -4405,6 +4643,7 @@
             el.setAttribute( "data-rel-rotate-y", step.relative.rotate.y );
             el.setAttribute( "data-rel-rotate-z", step.relative.rotate.z );
             prev = step;
+            prevEl = el;
         }
     };
 
@@ -4445,7 +4684,6 @@
         } );
     }, false );
 } )( document, window );
-
 
 /**
  * Resize plugin
